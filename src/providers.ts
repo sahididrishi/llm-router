@@ -11,7 +11,8 @@ import {
 // ── SSE parser ──────────────────────────────────────────────
 
 async function* parseSSE(response: Response): AsyncIterable<string> {
-  const reader = response.body!.getReader();
+  if (!response.body) return;
+  const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
@@ -127,7 +128,7 @@ export class AnthropicProvider implements Provider {
         if (event.type === "content_block_delta" && event.delta?.text) {
           yield event.delta.text;
         }
-      } catch {}
+      } catch (e) { /* skip non-JSON SSE lines */ }
     }
   }
 
@@ -137,7 +138,7 @@ export class AnthropicProvider implements Provider {
 
     for (const msg of messages) {
       if (msg.role === "system") {
-        sysPrompt = msg.content;
+        if (!sysPrompt) sysPrompt = msg.content;
       } else {
         apiMessages.push({ role: msg.role, content: msg.content });
       }
@@ -248,7 +249,7 @@ export class OpenAICompatProvider implements Provider {
         const event = JSON.parse(data);
         const content = event.choices?.[0]?.delta?.content;
         if (content) yield content;
-      } catch {}
+      } catch (e) { /* skip non-JSON SSE lines */ }
     }
   }
 

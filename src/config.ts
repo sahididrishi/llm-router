@@ -31,7 +31,14 @@ export function loadConfig(configPath?: string): RouterConfig {
 
 function parseConfigFile(filePath: string): RouterConfig {
   const raw = fs.readFileSync(filePath, "utf-8");
-  const config = JSON.parse(raw) as RouterConfig;
+  let config: RouterConfig;
+  try {
+    config = JSON.parse(raw) as RouterConfig;
+  } catch {
+    throw new Error(`Invalid JSON in config file: ${filePath}`);
+  }
+
+  if (!config.providers || typeof config.providers !== 'object') config.providers = {};
 
   // Resolve $ENV_VAR references in API keys
   for (const [name, provider] of Object.entries(config.providers)) {
@@ -96,6 +103,10 @@ export function saveConfigTemplate(location: "global" | "local" = "local"): stri
     location === "global"
       ? path.join(os.homedir(), ".llm-router", "config.json")
       : path.join(process.cwd(), ".llm-router.json");
+
+  if (fs.existsSync(filePath)) {
+    throw new Error(`Config already exists at ${filePath}. Delete it first or edit manually.`);
+  }
 
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {

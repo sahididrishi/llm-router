@@ -29,6 +29,7 @@ export class CostTracker {
 
     if (since) {
       const cutoff = new Date(since).getTime();
+      if (isNaN(cutoff)) throw new Error(`Invalid date: ${since}`);
       filtered = this.entries.filter(
         (e) => new Date(e.timestamp).getTime() >= cutoff
       );
@@ -77,7 +78,8 @@ export class CostTracker {
     try {
       if (fs.existsSync(COSTS_FILE)) {
         const raw = fs.readFileSync(COSTS_FILE, "utf-8");
-        this.entries = JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        this.entries = Array.isArray(parsed) ? parsed : [];
       }
     } catch {
       this.entries = [];

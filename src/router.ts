@@ -67,20 +67,40 @@ export class Router {
   // ── Streaming ───────────────────────────────────────────
 
   async *stream(message: string, opts?: ChatOptions): AsyncIterable<string> {
-    const providerName = opts?.provider || this.getProviderOrder(opts?.strategy || this.defaultStrategy, opts)[0]?.provider;
-    if (!providerName) throw new Error("No providers available");
-
-    const provider = this.providers.get(providerName);
-    if (!provider) throw new Error(`Provider '${providerName}' not found`);
-
-    const model = opts?.model || DEFAULT_MODELS[providerName] || "";
+    const strategy = opts?.strategy || this.defaultStrategy;
     const messages = this.buildMessages(message, opts);
 
-    yield* provider.streamChat(messages, model, {
-      maxTokens: opts?.maxTokens,
-      temperature: opts?.temperature,
-      system: opts?.system,
-    });
+    if (opts?.provider) {
+      const provider = this.providers.get(opts.provider);
+      if (!provider) throw new Error(`Provider '${opts.provider}' not found`);
+      const model = opts?.model || DEFAULT_MODELS[opts.provider] || "";
+      yield* provider.streamChat(messages, model, {
+        maxTokens: opts?.maxTokens,
+        temperature: opts?.temperature,
+        system: opts?.system,
+      });
+      return;
+    }
+
+    const order = this.getProviderOrder(strategy, opts);
+    if (order.length === 0) throw new Error("No providers available");
+
+    let lastError: Error | null = null;
+    for (const { provider: providerName, model } of order) {
+      try {
+        const provider = this.providers.get(providerName)!;
+        yield* provider.streamChat(messages, model, {
+          maxTokens: opts?.maxTokens,
+          temperature: opts?.temperature,
+          system: opts?.system,
+        });
+        return;
+      } catch (err: any) {
+        lastError = err;
+        if (strategy !== "fallback") throw err;
+      }
+    }
+    throw lastError || new Error("All providers failed");
   }
 
   // ── Benchmarking ────────────────────────────────────────
@@ -233,9 +253,6 @@ export class Router {
 
   private buildMessages(message: string, opts?: ChatOptions): Message[] {
     const messages: Message[] = [];
-    if (opts?.system) {
-      messages.push({ role: "system", content: opts.system });
-    }
     if (opts?.history) {
       messages.push(...opts.history);
     }

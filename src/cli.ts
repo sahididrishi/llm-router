@@ -38,6 +38,12 @@ program
   .option("--max-tokens <n>", "Maximum tokens in response", "4096")
   .action(async (message, opts) => {
     try {
+      const maxTokens = parseInt(opts.maxTokens);
+      if (isNaN(maxTokens) || maxTokens <= 0) {
+        console.error("Error: --max-tokens must be a positive number");
+        process.exit(1);
+      }
+
       const router = new Router();
 
       if (opts.stream) {
@@ -46,7 +52,7 @@ program
           model: opts.model,
           strategy: opts.strategy,
           system: opts.system,
-          maxTokens: parseInt(opts.maxTokens),
+          maxTokens,
         })) {
           process.stdout.write(chunk);
         }
@@ -57,7 +63,7 @@ program
           model: opts.model,
           strategy: opts.strategy as any,
           system: opts.system,
-          maxTokens: parseInt(opts.maxTokens),
+          maxTokens,
         });
 
         console.log(response.text);
@@ -202,7 +208,19 @@ program
       console.log(`Config file created at: ${filePath}`);
       console.log("Edit it to add your API keys, or set them as environment variables.");
     } else if (action === "show") {
-      console.log(generateConfigTemplate());
+      try {
+        const config = loadConfig();
+        // Mask API keys for display
+        const display = JSON.parse(JSON.stringify(config));
+        for (const [name, provider] of Object.entries(display.providers || {})) {
+          if ((provider as any)?.apiKey) {
+            (provider as any).apiKey = (provider as any).apiKey.slice(0, 8) + "...";
+          }
+        }
+        console.log(JSON.stringify(display, null, 2));
+      } catch {
+        console.log("No config loaded. Using env vars. Run: llm-router config init");
+      }
     } else {
       console.log("Usage: llm-router config init [--global] | llm-router config show");
     }
