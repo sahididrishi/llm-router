@@ -8,6 +8,14 @@ import {
   DEFAULT_MODELS as DEFAULTS,
 } from "./types.js";
 
+// ── Fetch with timeout ──────────────────────────────────────
+
+function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 // ── SSE parser ──────────────────────────────────────────────
 
 async function* parseSSE(response: Response): AsyncIterable<string> {
@@ -40,10 +48,12 @@ export class AnthropicProvider implements Provider {
   name = "anthropic";
   private apiKey: string;
   private baseUrl: string;
+  private timeoutMs: number;
 
   constructor(config: ProviderConfig) {
     this.apiKey = config.apiKey || process.env.ANTHROPIC_API_KEY || "";
     this.baseUrl = config.baseUrl || URLS.anthropic;
+    this.timeoutMs = config.timeoutMs || 30_000;
   }
 
   isAvailable(): boolean {
@@ -61,7 +71,7 @@ export class AnthropicProvider implements Provider {
   ): Promise<ProviderResponse> {
     const { system, apiMessages } = this.formatMessages(messages, opts?.system);
 
-    const response = await fetch(`${this.baseUrl}/v1/messages`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/v1/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -75,7 +85,7 @@ export class AnthropicProvider implements Provider {
         system: system || undefined,
         messages: apiMessages,
       }),
-    });
+    }, this.timeoutMs);
 
     if (!response.ok) {
       const err = await response.text();
@@ -100,7 +110,7 @@ export class AnthropicProvider implements Provider {
   ): AsyncIterable<string> {
     const { system, apiMessages } = this.formatMessages(messages, opts?.system);
 
-    const response = await fetch(`${this.baseUrl}/v1/messages`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/v1/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -115,7 +125,7 @@ export class AnthropicProvider implements Provider {
         messages: apiMessages,
         stream: true,
       }),
-    });
+    }, this.timeoutMs);
 
     if (!response.ok) {
       const err = await response.text();
@@ -155,11 +165,13 @@ export class OpenAICompatProvider implements Provider {
   name: string;
   private apiKey: string;
   private baseUrl: string;
+  private timeoutMs: number;
 
   constructor(providerName: string, config: ProviderConfig) {
     this.name = providerName;
     this.apiKey = config.apiKey || this.envKey(providerName) || "";
     this.baseUrl = config.baseUrl || URLS[providerName] || URLS.openai;
+    this.timeoutMs = config.timeoutMs || 30_000;
   }
 
   isAvailable(): boolean {
@@ -186,7 +198,7 @@ export class OpenAICompatProvider implements Provider {
       headers["Authorization"] = `Bearer ${this.apiKey}`;
     }
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -195,7 +207,7 @@ export class OpenAICompatProvider implements Provider {
         temperature: opts?.temperature,
         messages: apiMessages,
       }),
-    });
+    }, this.timeoutMs);
 
     if (!response.ok) {
       const err = await response.text();
@@ -227,7 +239,7 @@ export class OpenAICompatProvider implements Provider {
       headers["Authorization"] = `Bearer ${this.apiKey}`;
     }
 
-    const response = await fetch(`${this.baseUrl}/chat/completions`, {
+    const response = await fetchWithTimeout(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -237,7 +249,7 @@ export class OpenAICompatProvider implements Provider {
         messages: apiMessages,
         stream: true,
       }),
-    });
+    }, this.timeoutMs);
 
     if (!response.ok) {
       const err = await response.text();

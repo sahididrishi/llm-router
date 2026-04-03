@@ -8,6 +8,7 @@ import { CostTracker } from "../src/tracker.js";
 import { loadConfig, generateConfigTemplate, saveConfigTemplate } from "../src/config.js";
 import { createProvider } from "../src/providers.js";
 import { MODEL_REGISTRY, DEFAULT_BASE_URLS, DEFAULT_MODELS } from "../src/types.js";
+import { CircuitBreaker } from "../src/circuit-breaker.js";
 
 // ── Model registry ──────���───────────────────────────────────
 
@@ -294,5 +295,65 @@ describe("Config", () => {
     // loadConfig() without an explicit path falls back to env vars
     const config = loadConfig();
     assert.ok(config.providers);
+  });
+});
+
+// ── Circuit Breaker ──────────────────────────────────────────
+
+describe("CircuitBreaker", () => {
+  it("starts in closed state", () => {
+    const cb = new CircuitBreaker("test");
+    assert.equal(cb.getState(), "closed");
+    assert.ok(cb.canExecute());
+  });
+
+  it("opens after threshold failures", () => {
+    const cb = new CircuitBreaker("test", { failureThreshold: 3 });
+    cb.recordFailure();
+    cb.recordFailure();
+    assert.equal(cb.getState(), "closed");
+    cb.recordFailure();
+    assert.equal(cb.getState(), "open");
+    assert.ok(!cb.canExecute());
+  });
+
+  it("resets on success", () => {
+    const cb = new CircuitBreaker("test", { failureThreshold: 3 });
+    cb.recordFailure();
+    cb.recordFailure();
+    cb.recordSuccess();
+    assert.equal(cb.getState(), "closed");
+    assert.equal(cb.getFailures(), 0);
+  });
+
+  it("transitions to half-open after reset timeout", () => {
+    const cb = new CircuitBreaker("test", { failureThreshold: 1, resetTimeoutMs: 10 });
+    cb.recordFailure();
+    assert.equal(cb.getState(), "open");
+    // Wait for timeout
+    const start = Date.now();
+    while (Date.now() - start < 15) {} // busy wait 15ms
+    assert.ok(cb.canExecute());
+    assert.equal(cb.getState(), "half-open");
+  });
+
+  it("closes from half-open on success", () => {
+    const cb = new CircuitBreaker("test", { failureThreshold: 1, resetTimeoutMs: 10 });
+    cb.recordFailure();
+    const start = Date.now();
+    while (Date.now() - start < 15) {}
+    cb.canExecute(); // triggers half-open
+    cb.recordSuccess();
+    assert.equal(cb.getState(), "closed");
+  });
+
+  it("re-opens from half-open on failure", () => {
+    const cb = new CircuitBreaker("test", { failureThreshold: 1, resetTimeoutMs: 10 });
+    cb.recordFailure();
+    const start = Date.now();
+    while (Date.now() - start < 15) {}
+    cb.canExecute();
+    cb.recordFailure();
+    assert.equal(cb.getState(), "open");
   });
 });

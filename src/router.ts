@@ -1,6 +1,7 @@
 import { createProvider } from "./providers.js";
 import { CostTracker } from "./tracker.js";
 import { loadConfig } from "./config.js";
+import { CircuitBreaker } from "./circuit-breaker.js";
 import type {
   RouterConfig, ChatOptions, ChatResponse, Message, Provider, ModelInfo,
   RoutingStrategy, BenchmarkResult, CostSummary, MODEL_REGISTRY,
@@ -9,6 +10,7 @@ import { MODEL_REGISTRY as MODELS, DEFAULT_MODELS } from "./types.js";
 
 export class Router {
   private providers: Map<string, Provider> = new Map();
+  private breakers: Map<string, CircuitBreaker> = new Map();
   private tracker: CostTracker;
   private defaultStrategy: RoutingStrategy;
   private roundRobinIndex = 0;
@@ -25,6 +27,10 @@ export class Router {
         this.providers.set(name, provider);
       }
     }
+
+    for (const name of this.providers.keys()) {
+      this.breakers.set(name, new CircuitBreaker(name));
+    }
   }
 
   // ── Core: send a message ────────────────────────────────
@@ -39,7 +45,7 @@ export class Router {
     }
 
     // Get ordered list of providers based on strategy
-    const order = this.getProviderOrder(strategy, opts);
+    const order = this.getProviderOrder(strategy, opts, messages);
 
     if (order.length === 0) {
       throw new Error(
@@ -82,7 +88,7 @@ export class Router {
       return;
     }
 
-    const order = this.getProviderOrder(strategy, opts);
+    const order = this.getProviderOrder(strategy, opts, messages);
     if (order.length === 0) throw new Error("No providers available");
 
     let lastError: Error | null = null;
@@ -212,43 +218,55 @@ export class Router {
       );
     }
 
+    const breaker = this.breakers.get(providerName);
+    if (breaker && !breaker.canExecute()) {
+      throw new Error(`Provider '${providerName}' circuit is open (too many failures)`);
+    }
+
     const model = opts?.model || DEFAULT_MODELS[providerName] || "";
     const start = performance.now();
 
-    const response = await provider.chat(messages, model, {
-      maxTokens: opts?.maxTokens,
-      temperature: opts?.temperature,
-      system: opts?.system,
-    });
+    try {
+      const response = await provider.chat(messages, model, {
+        maxTokens: opts?.maxTokens,
+        temperature: opts?.temperature,
+        system: opts?.system,
+      });
 
-    const latencyMs = Math.round(performance.now() - start);
-    const modelInfo = this.findModel(providerName, response.model);
-    const cost = this.calculateCost(
-      response.inputTokens,
-      response.outputTokens,
-      modelInfo
-    );
+      const latencyMs = Math.round(performance.now() - start);
+      const modelInfo = this.findModel(providerName, response.model);
+      const cost = this.calculateCost(
+        response.inputTokens,
+        response.outputTokens,
+        modelInfo
+      );
 
-    this.tracker.record({
-      provider: providerName,
-      model: response.model,
-      inputTokens: response.inputTokens,
-      outputTokens: response.outputTokens,
-      cost,
-      latencyMs,
-    });
-
-    return {
-      text: response.text,
-      model: response.model,
-      provider: providerName,
-      usage: {
+      this.tracker.record({
+        provider: providerName,
+        model: response.model,
         inputTokens: response.inputTokens,
         outputTokens: response.outputTokens,
         cost,
-      },
-      latencyMs,
-    };
+        latencyMs,
+      });
+
+      breaker?.recordSuccess();
+
+      return {
+        text: response.text,
+        model: response.model,
+        provider: providerName,
+        usage: {
+          inputTokens: response.inputTokens,
+          outputTokens: response.outputTokens,
+          cost,
+        },
+        latencyMs,
+      };
+    } catch (err) {
+      breaker?.recordFailure();
+      throw err;
+    }
   }
 
   private buildMessages(message: string, opts?: ChatOptions): Message[] {
@@ -262,7 +280,8 @@ export class Router {
 
   private getProviderOrder(
     strategy: RoutingStrategy,
-    opts?: ChatOptions
+    opts?: ChatOptions,
+    messages?: Message[]
   ): Array<{ provider: string; model: string }> {
     const available = opts?.providers
       ? opts.providers.filter((p) => this.providers.has(p))
@@ -272,7 +291,7 @@ export class Router {
 
     switch (strategy) {
       case "cheapest":
-        return this.sortByCost(available);
+        return this.sortByCost(available, messages);
       case "fastest":
         return this.sortBySpeed(available);
       case "smartest":
@@ -285,18 +304,31 @@ export class Router {
     }
   }
 
-  private sortByCost(providers: string[]): Array<{ provider: string; model: string }> {
+  private estimateTokens(messages: Message[]): number {
+    let chars = 0;
+    for (const msg of messages) {
+      chars += msg.content.length;
+    }
+    return Math.ceil(chars / 4); // rough estimate: ~4 chars per token
+  }
+
+  private sortByCost(providers: string[], messages?: Message[]): Array<{ provider: string; model: string }> {
+    const estimatedInputTokens = messages ? this.estimateTokens(messages) : 1000;
+    const estimatedOutputTokens = 500; // reasonable default
+
     return providers
       .flatMap((p) => {
         const models = MODELS.filter((m) => m.provider === p);
-        if (models.length === 0) return [{ provider: p, model: DEFAULT_MODELS[p] || "", avgCost: 999 }];
-        // Pick the cheapest model for this provider
-        const cheapest = models.sort(
-          (a, b) => a.inputCostPer1M + a.outputCostPer1M - (b.inputCostPer1M + b.outputCostPer1M)
-        )[0];
-        return [{ provider: p, model: cheapest.id, avgCost: cheapest.inputCostPer1M + cheapest.outputCostPer1M }];
+        if (models.length === 0) return [{ provider: p, model: DEFAULT_MODELS[p] || "", cost: 999 }];
+        const cheapest = models.sort((a, b) => {
+          const costA = (estimatedInputTokens / 1_000_000) * a.inputCostPer1M + (estimatedOutputTokens / 1_000_000) * a.outputCostPer1M;
+          const costB = (estimatedInputTokens / 1_000_000) * b.inputCostPer1M + (estimatedOutputTokens / 1_000_000) * b.outputCostPer1M;
+          return costA - costB;
+        })[0];
+        const cost = (estimatedInputTokens / 1_000_000) * cheapest.inputCostPer1M + (estimatedOutputTokens / 1_000_000) * cheapest.outputCostPer1M;
+        return [{ provider: p, model: cheapest.id, cost }];
       })
-      .sort((a, b) => a.avgCost - b.avgCost)
+      .sort((a, b) => a.cost - b.cost)
       .map(({ provider, model }) => ({ provider, model }));
   }
 

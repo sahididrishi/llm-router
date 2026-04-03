@@ -4,6 +4,7 @@ export interface ProviderConfig {
   apiKey?: string;
   baseUrl?: string;
   defaultModel?: string;
+  timeoutMs?: number;
 }
 
 export interface RouterConfig {

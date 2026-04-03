@@ -10,6 +10,8 @@ export { CostTracker } from "./tracker.js";
 export { loadConfig, generateConfigTemplate } from "./config.js";
 export { createProvider, AnthropicProvider, OpenAICompatProvider } from "./providers.js";
 export { MODEL_REGISTRY, DEFAULT_BASE_URLS, DEFAULT_MODELS } from "./types.js";
+export { CircuitBreaker } from "./circuit-breaker.js";
+export type { CircuitState, CircuitBreakerConfig } from "./circuit-breaker.js";
 export type {
   RouterConfig,
   ChatOptions,
