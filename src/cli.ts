@@ -3,7 +3,7 @@
 import { Command } from "commander";
 import { Router } from "./router.js";
 import { loadConfig, saveConfigTemplate, generateConfigTemplate } from "./config.js";
-import type { BenchmarkResult, CostSummary } from "./types.js";
+import type { BenchmarkResult, CostSummary, RoutingStrategy } from "./types.js";
 
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -48,6 +48,12 @@ program
         process.exit(1);
       }
 
+      const validStrategies = ["cheapest", "fastest", "smartest", "fallback", "round-robin"];
+      if (opts.strategy && !validStrategies.includes(opts.strategy)) {
+        console.error(c(RD, `Error: Invalid strategy '${opts.strategy}'. Valid: ${validStrategies.join(", ")}`));
+        process.exit(1);
+      }
+
       const router = new Router();
 
       if (opts.stream) {
@@ -65,7 +71,7 @@ program
         const response = await router.chat(message, {
           provider: opts.provider,
           model: opts.model,
-          strategy: opts.strategy as any,
+          strategy: opts.strategy as RoutingStrategy,
           system: opts.system,
           maxTokens,
         });
@@ -213,8 +219,8 @@ program
   .action((action, opts) => {
     try {
       if (action === "init") {
-        const location = opts.global ? "global" : "local";
-        const filePath = saveConfigTemplate(location as any);
+        const location: "global" | "local" = opts.global ? "global" : "local";
+        const filePath = saveConfigTemplate(location);
         console.log(`Config file created at: ${filePath}`);
         console.log("Edit it to add your API keys, or set them as environment variables.");
       } else if (action === "show") {

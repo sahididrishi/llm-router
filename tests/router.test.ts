@@ -1,5 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { setTimeout as sleep } from "node:timers/promises";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -333,32 +334,29 @@ describe("CircuitBreaker", () => {
     assert.equal(cb.getFailures(), 0);
   });
 
-  it("transitions to half-open after reset timeout", () => {
+  it("transitions to half-open after reset timeout", async () => {
     const cb = new CircuitBreaker("test", { failureThreshold: 1, resetTimeoutMs: 10 });
     cb.recordFailure();
     assert.equal(cb.getState(), "open");
     // Wait for timeout
-    const start = Date.now();
-    while (Date.now() - start < 15) {} // busy wait 15ms
+    await sleep(20);
     assert.ok(cb.canExecute());
     assert.equal(cb.getState(), "half-open");
   });
 
-  it("closes from half-open on success", () => {
+  it("closes from half-open on success", async () => {
     const cb = new CircuitBreaker("test", { failureThreshold: 1, resetTimeoutMs: 10 });
     cb.recordFailure();
-    const start = Date.now();
-    while (Date.now() - start < 15) {}
+    await sleep(20);
     cb.canExecute(); // triggers half-open
     cb.recordSuccess();
     assert.equal(cb.getState(), "closed");
   });
 
-  it("re-opens from half-open on failure", () => {
+  it("re-opens from half-open on failure", async () => {
     const cb = new CircuitBreaker("test", { failureThreshold: 1, resetTimeoutMs: 10 });
     cb.recordFailure();
-    const start = Date.now();
-    while (Date.now() - start < 15) {}
+    await sleep(20);
     cb.canExecute();
     cb.recordFailure();
     assert.equal(cb.getState(), "open");

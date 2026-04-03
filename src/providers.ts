@@ -41,6 +41,20 @@ async function* parseSSE(response: Response): AsyncIterable<string> {
   }
 }
 
+// ── Response interfaces ──────────────────────────────────────
+
+interface AnthropicResponse {
+  content?: Array<{ text: string }>;
+  model: string;
+  usage?: { input_tokens: number; output_tokens: number };
+}
+
+interface OpenAIResponse {
+  choices?: Array<{ message: { content: string } }>;
+  model: string;
+  usage?: { prompt_tokens: number; completion_tokens: number };
+}
+
 // ── Anthropic provider ──────────────────────────────────────
 
 export class AnthropicProvider implements Provider {
@@ -91,7 +105,7 @@ export class AnthropicProvider implements Provider {
       throw new Error(`Anthropic API error (${response.status}): ${err}`);
     }
 
-    const data = await response.json() as any;
+    const data = await response.json() as AnthropicResponse;
     const text = data.content?.[0]?.text || "";
 
     return {
@@ -213,7 +227,7 @@ export class OpenAICompatProvider implements Provider {
       throw new Error(`${this.name} API error (${response.status}): ${err}`);
     }
 
-    const data = await response.json() as any;
+    const data = await response.json() as OpenAIResponse;
     const text = data.choices?.[0]?.message?.content || "";
 
     return {

@@ -91,20 +91,37 @@ export class Router {
     if (opts?.provider) {
       const provider = this.providers.get(opts.provider);
       if (!provider) throw new ProviderNotFoundError(opts.provider, this.listProviders());
+      const breaker = this.breakers.get(opts.provider);
+      if (breaker && !breaker.canExecute()) throw new CircuitOpenError(opts.provider);
       const model = opts?.model || DEFAULT_MODELS[opts.provider] || "";
-      yield* provider.streamChat(messages, model, {
-        maxTokens: opts?.maxTokens,
-        temperature: opts?.temperature,
-        system: opts?.system,
-      });
+      try {
+        yield* provider.streamChat(messages, model, {
+          maxTokens: opts?.maxTokens,
+          temperature: opts?.temperature,
+          system: opts?.system,
+        });
+        breaker?.recordSuccess();
+      } catch (err) {
+        breaker?.recordFailure();
+        throw err;
+      }
       return;
     }
 
     const order = this.getProviderOrder(strategy, opts, messages);
     if (order.length === 0) throw new NoProvidersError();
 
+    // Failover: retry with next provider for strategies that imply "try alternatives"
+    // fastest and round-robin are explicit single-provider selections — no fallback
     let lastError: Error | null = null;
     for (const { provider: providerName, model } of order) {
+      const breaker = this.breakers.get(providerName);
+      if (breaker && !breaker.canExecute()) {
+        lastError = new CircuitOpenError(providerName);
+        if (strategy !== "fallback" && strategy !== "cheapest" && strategy !== "smartest") throw lastError;
+        continue;
+      }
+
       try {
         const provider = this.providers.get(providerName)!;
         yield* provider.streamChat(messages, model, {
@@ -112,8 +129,10 @@ export class Router {
           temperature: opts?.temperature,
           system: opts?.system,
         });
+        breaker?.recordSuccess();
         return;
       } catch (err: unknown) {
+        breaker?.recordFailure();
         lastError = err instanceof Error ? err : new Error(String(err));
         if (strategy !== "fallback" && strategy !== "cheapest" && strategy !== "smartest") throw lastError;
       }
