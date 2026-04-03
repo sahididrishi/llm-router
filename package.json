@@ -1,0 +1,31 @@
+{
+  "name": "llm-router",
+  "version": "1.0.0",
+  "description": "Unified LLM router — one interface for Claude, GPT, Gemini, Groq, Ollama, and any OpenAI-compatible API. Smart routing, automatic failover, cost tracking.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "llm-router": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "dev": "tsx src/cli.ts",
+    "test": "tsx --test tests/router.test.ts"
+  },
+  "keywords": [
+    "llm", "ai", "router", "claude", "openai", "groq", "ollama",
+    "anthropic", "multi-provider", "failover", "cost-tracking"
+  ],
+  "author": "Sahid Idrishi",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "commander": "^14.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}
