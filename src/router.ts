@@ -2,11 +2,24 @@ import { createProvider } from "./providers.js";
 import { CostTracker } from "./tracker.js";
 import { loadConfig } from "./config.js";
 import { CircuitBreaker } from "./circuit-breaker.js";
+import {
+  NoProvidersError,
+  ProviderNotFoundError,
+  CircuitOpenError,
+  AllProvidersFailedError,
+} from "./errors.js";
 import type {
   RouterConfig, ChatOptions, ChatResponse, Message, Provider, ModelInfo,
   RoutingStrategy, BenchmarkResult, CostSummary, MODEL_REGISTRY,
 } from "./types.js";
 import { MODEL_REGISTRY as MODELS, DEFAULT_MODELS } from "./types.js";
+
+const CHARS_PER_TOKEN_ESTIMATE = 4;
+const DEFAULT_OUTPUT_TOKEN_ESTIMATE = 500;
+
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 export class Router {
   private providers: Map<string, Provider> = new Map();
@@ -35,6 +48,7 @@ export class Router {
 
   // ── Core: send a message ────────────────────────────────
 
+  /** Send a message to an LLM. Automatically routes based on strategy with failover. */
   async chat(message: string, opts?: ChatOptions): Promise<ChatResponse> {
     const strategy = opts?.strategy || this.defaultStrategy;
     const messages = this.buildMessages(message, opts);
@@ -48,10 +62,7 @@ export class Router {
     const order = this.getProviderOrder(strategy, opts, messages);
 
     if (order.length === 0) {
-      throw new Error(
-        "No providers available. Set API keys via env vars or config file.\n" +
-        "Run: llm-router config init"
-      );
+      throw new NoProvidersError();
     }
 
     // Try providers in order (failover)
@@ -59,26 +70,27 @@ export class Router {
     for (const { provider, model } of order) {
       try {
         return await this.sendToProvider(provider, messages, { ...opts, model });
-      } catch (err: any) {
-        lastError = err;
+      } catch (err: unknown) {
+        lastError = err instanceof Error ? err : new Error(String(err));
         if (strategy !== "fallback" && strategy !== "cheapest" && strategy !== "smartest") {
-          throw err; // Only failover for certain strategies
+          throw lastError; // Only failover for certain strategies
         }
       }
     }
 
-    throw lastError || new Error("All providers failed");
+    throw new AllProvidersFailedError(lastError ?? undefined);
   }
 
   // ── Streaming ───────────────────────────────────────────
 
+  /** Stream a response from an LLM. Supports failover for fallback/cheapest/smartest strategies. */
   async *stream(message: string, opts?: ChatOptions): AsyncIterable<string> {
     const strategy = opts?.strategy || this.defaultStrategy;
     const messages = this.buildMessages(message, opts);
 
     if (opts?.provider) {
       const provider = this.providers.get(opts.provider);
-      if (!provider) throw new Error(`Provider '${opts.provider}' not found`);
+      if (!provider) throw new ProviderNotFoundError(opts.provider, this.listProviders());
       const model = opts?.model || DEFAULT_MODELS[opts.provider] || "";
       yield* provider.streamChat(messages, model, {
         maxTokens: opts?.maxTokens,
@@ -89,7 +101,7 @@ export class Router {
     }
 
     const order = this.getProviderOrder(strategy, opts, messages);
-    if (order.length === 0) throw new Error("No providers available");
+    if (order.length === 0) throw new NoProvidersError();
 
     let lastError: Error | null = null;
     for (const { provider: providerName, model } of order) {
@@ -101,16 +113,17 @@ export class Router {
           system: opts?.system,
         });
         return;
-      } catch (err: any) {
-        lastError = err;
-        if (strategy !== "fallback" && strategy !== "cheapest" && strategy !== "smartest") throw err;
+      } catch (err: unknown) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (strategy !== "fallback" && strategy !== "cheapest" && strategy !== "smartest") throw lastError;
       }
     }
-    throw lastError || new Error("All providers failed");
+    throw new AllProvidersFailedError(lastError ?? undefined);
   }
 
   // ── Benchmarking ────────────────────────────────────────
 
+  /** Benchmark a prompt across multiple providers. Returns timing, cost, and response preview. */
   async benchmark(
     prompt: string,
     providerNames?: string[]
@@ -161,7 +174,7 @@ export class Router {
           cost,
           responsePreview: response.text.slice(0, 150) + (response.text.length > 150 ? "..." : ""),
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
         results.push({
           provider: name,
           model,
@@ -170,7 +183,7 @@ export class Router {
           outputTokens: 0,
           cost: 0,
           responsePreview: "",
-          error: err.message?.slice(0, 100),
+          error: getErrorMessage(err).slice(0, 100),
         });
       }
     }
@@ -180,10 +193,12 @@ export class Router {
 
   // ── Info ────────────────────────────────────────────────
 
+  /** List names of all configured and available providers. */
   listProviders(): string[] {
     return [...this.providers.keys()];
   }
 
+  /** List available models, optionally filtered by provider. */
   listModels(providerName?: string): ModelInfo[] {
     if (providerName) {
       const provider = this.providers.get(providerName);
@@ -196,10 +211,12 @@ export class Router {
     return models;
   }
 
+  /** Get cost tracking summary, optionally filtered by date. */
   getCosts(since?: string): CostSummary {
     return this.tracker.getSummary(since);
   }
 
+  /** Clear all cost tracking history. */
   clearCosts(): void {
     this.tracker.clear();
   }
@@ -213,14 +230,12 @@ export class Router {
   ): Promise<ChatResponse> {
     const provider = this.providers.get(providerName);
     if (!provider) {
-      throw new Error(
-        `Provider '${providerName}' not configured. Available: ${this.listProviders().join(", ")}`
-      );
+      throw new ProviderNotFoundError(providerName, this.listProviders());
     }
 
     const breaker = this.breakers.get(providerName);
     if (breaker && !breaker.canExecute()) {
-      throw new Error(`Provider '${providerName}' circuit is open (too many failures)`);
+      throw new CircuitOpenError(providerName);
     }
 
     const model = opts?.model || DEFAULT_MODELS[providerName] || "";
@@ -309,12 +324,12 @@ export class Router {
     for (const msg of messages) {
       chars += msg.content.length;
     }
-    return Math.ceil(chars / 4); // rough estimate: ~4 chars per token
+    return Math.ceil(chars / CHARS_PER_TOKEN_ESTIMATE); // rough estimate: ~4 chars per token
   }
 
   private sortByCost(providers: string[], messages?: Message[]): Array<{ provider: string; model: string }> {
     const estimatedInputTokens = messages ? this.estimateTokens(messages) : 1000;
-    const estimatedOutputTokens = 500; // reasonable default
+    const estimatedOutputTokens = DEFAULT_OUTPUT_TOKEN_ESTIMATE; // reasonable default
 
     return providers
       .flatMap((p) => {

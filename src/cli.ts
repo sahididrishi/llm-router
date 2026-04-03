@@ -5,6 +5,10 @@ import { Router } from "./router.js";
 import { loadConfig, saveConfigTemplate, generateConfigTemplate } from "./config.js";
 import type { BenchmarkResult, CostSummary } from "./types.js";
 
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 // ── ANSI helpers ────────────────────────────────────────────
 
 const B = "\x1b[1m";
@@ -73,8 +77,8 @@ program
             `${response.latencyMs}ms | $${response.usage.cost.toFixed(4)}`)}`
         );
       }
-    } catch (err: any) {
-      console.error(c(RD, `Error: ${err.message}`));
+    } catch (err: unknown) {
+      console.error(c(RD, `Error: ${getErrorMessage(err)}`));
       process.exit(1);
     }
   });
@@ -95,8 +99,8 @@ program
 
       const results = await router.benchmark(prompt, providers);
       printBenchmarkTable(results);
-    } catch (err: any) {
-      console.error(c(RD, `Error: ${err.message}`));
+    } catch (err: unknown) {
+      console.error(c(RD, `Error: ${getErrorMessage(err)}`));
       process.exit(1);
     }
   });
@@ -163,8 +167,8 @@ program
 
       const summary = router.getCosts(opts.since);
       printCostSummary(summary, opts.since);
-    } catch (err: any) {
-      console.error(c(RD, `Error: ${err.message}`));
+    } catch (err: unknown) {
+      console.error(c(RD, `Error: ${getErrorMessage(err)}`));
       process.exit(1);
     }
   });
@@ -229,8 +233,8 @@ program
     } else {
       console.log("Usage: llm-router config init [--global] | llm-router config show");
     }
-    } catch (err: any) {
-      console.error(c(RD, `Error: ${err.message}`));
+    } catch (err: unknown) {
+      console.error(c(RD, `Error: ${getErrorMessage(err)}`));
       process.exit(1);
     }
   });

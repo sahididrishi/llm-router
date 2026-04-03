@@ -23,6 +23,7 @@ export class CircuitBreaker {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
+  /** Check if requests can be sent to this provider. */
   canExecute(): boolean {
     if (this.state === "closed") return true;
     if (this.state === "open") {
@@ -37,12 +38,14 @@ export class CircuitBreaker {
     return this.halfOpenAttempts < this.config.halfOpenMaxAttempts;
   }
 
+  /** Record a successful request. Resets failure count and closes circuit. */
   recordSuccess(): void {
     this.failures = 0;
     this.state = "closed";
     this.halfOpenAttempts = 0;
   }
 
+  /** Record a failed request. Opens circuit if threshold is reached. */
   recordFailure(): void {
     this.failures++;
     this.lastFailureTime = Date.now();

@@ -6,6 +6,7 @@
 //   const response = await router.chat("Hello");
 
 export { Router } from "./router.js";
+export { RouterError, NoProvidersError, ProviderNotFoundError, CircuitOpenError, AllProvidersFailedError } from "./errors.js";
 export { CostTracker } from "./tracker.js";
 export { loadConfig, generateConfigTemplate } from "./config.js";
 export { createProvider, AnthropicProvider, OpenAICompatProvider } from "./providers.js";

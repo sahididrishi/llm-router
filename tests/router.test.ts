@@ -9,6 +9,13 @@ import { loadConfig, generateConfigTemplate, saveConfigTemplate } from "../src/c
 import { createProvider } from "../src/providers.js";
 import { MODEL_REGISTRY, DEFAULT_BASE_URLS, DEFAULT_MODELS } from "../src/types.js";
 import { CircuitBreaker } from "../src/circuit-breaker.js";
+import {
+  RouterError,
+  NoProvidersError,
+  ProviderNotFoundError,
+  CircuitOpenError,
+  AllProvidersFailedError,
+} from "../src/errors.js";
 
 // ── Model registry ──────���───────────────────────────────────
 
@@ -355,5 +362,44 @@ describe("CircuitBreaker", () => {
     cb.canExecute();
     cb.recordFailure();
     assert.equal(cb.getState(), "open");
+  });
+});
+
+// ── Error hierarchy ─────────────────────────────────────────
+
+describe("Error hierarchy", () => {
+  it("NoProvidersError has correct code", () => {
+    const err = new NoProvidersError();
+    assert.equal(err.code, "NO_PROVIDERS");
+    assert.ok(err instanceof RouterError);
+    assert.ok(err instanceof Error);
+  });
+
+  it("ProviderNotFoundError includes provider name", () => {
+    const err = new ProviderNotFoundError("anthropic", ["openai", "groq"]);
+    assert.ok(err.message.includes("anthropic"));
+    assert.ok(err.message.includes("openai"));
+    assert.equal(err.code, "PROVIDER_NOT_FOUND");
+  });
+
+  it("CircuitOpenError includes provider name", () => {
+    const err = new CircuitOpenError("openai");
+    assert.ok(err.message.includes("openai"));
+    assert.equal(err.code, "CIRCUIT_OPEN");
+  });
+
+  it("AllProvidersFailedError includes last error", () => {
+    const cause = new Error("connection refused");
+    const err = new AllProvidersFailedError(cause);
+    assert.ok(err.message.includes("connection refused"));
+    assert.equal(err.code, "ALL_FAILED");
+  });
+
+  it("Router throws NoProvidersError when no providers configured", async () => {
+    const router = new Router({ providers: {}, trackCosts: false });
+    await assert.rejects(() => router.chat("Hello"), (err: any) => {
+      assert.ok(err instanceof NoProvidersError);
+      return true;
+    });
   });
 });
