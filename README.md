@@ -258,9 +258,11 @@ llm-router/
 │   ├── router.ts      # Router class — strategies, failover, tracking
 │   ├── tracker.ts     # Cost tracking with JSON persistence
 │   ├── config.ts      # Config file loading with $ENV_VAR support
-│   └── cli.ts         # CLI — chat, bench, models, costs, config
+│   ├── cli.ts             # CLI — chat, bench, models, costs, config
+│   ├── circuit-breaker.ts # Circuit breaker with closed/open/half-open states
+│   └── errors.ts          # Typed error hierarchy (RouterError, CircuitOpenError, etc.)
 ├── tests/
-│   └── router.test.ts # 25 tests — models, providers, router, costs, config
+│   └── router.test.ts # 36 tests — models, providers, router, costs, config, circuit breaker, errors
 ├── dist/              # Compiled JavaScript + type declarations
 ├── package.json
 ├── tsconfig.json

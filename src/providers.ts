@@ -1,6 +1,5 @@
 import type {
   Provider, ProviderConfig, ProviderResponse, Message, ModelInfo,
-  MODEL_REGISTRY, DEFAULT_BASE_URLS, DEFAULT_MODELS,
 } from "./types.js";
 import {
   MODEL_REGISTRY as MODELS,

@@ -10,7 +10,7 @@ import {
 } from "./errors.js";
 import type {
   RouterConfig, ChatOptions, ChatResponse, Message, Provider, ModelInfo,
-  RoutingStrategy, BenchmarkResult, CostSummary, MODEL_REGISTRY,
+  RoutingStrategy, BenchmarkResult, CostSummary,
 } from "./types.js";
 import { MODEL_REGISTRY as MODELS, DEFAULT_MODELS } from "./types.js";
 
