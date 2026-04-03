@@ -261,7 +261,12 @@ export class OpenAICompatProvider implements Provider {
     }
 
     for (const msg of messages) {
-      apiMessages.push({ role: msg.role, content: msg.content });
+      // Skip system messages from history if we already have an explicit system prompt
+      if (msg.role === "system") {
+        if (!system) apiMessages.push({ role: msg.role, content: msg.content });
+      } else {
+        apiMessages.push({ role: msg.role, content: msg.content });
+      }
     }
 
     return apiMessages;

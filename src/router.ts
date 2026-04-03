@@ -97,7 +97,7 @@ export class Router {
         return;
       } catch (err: any) {
         lastError = err;
-        if (strategy !== "fallback") throw err;
+        if (strategy !== "fallback" && strategy !== "cheapest" && strategy !== "smartest") throw err;
       }
     }
     throw lastError || new Error("All providers failed");

@@ -152,16 +152,21 @@ program
   .option("--since <date>", "Filter from date (YYYY-MM-DD)")
   .option("--clear", "Clear all cost history")
   .action((opts) => {
-    const router = new Router();
+    try {
+      const router = new Router();
 
-    if (opts.clear) {
-      router.clearCosts();
-      console.log("Cost history cleared.");
-      return;
+      if (opts.clear) {
+        router.clearCosts();
+        console.log("Cost history cleared.");
+        return;
+      }
+
+      const summary = router.getCosts(opts.since);
+      printCostSummary(summary, opts.since);
+    } catch (err: any) {
+      console.error(c(RD, `Error: ${err.message}`));
+      process.exit(1);
     }
-
-    const summary = router.getCosts(opts.since);
-    printCostSummary(summary, opts.since);
   });
 
 // ── providers ───────────────────────────────────────────────
@@ -202,27 +207,31 @@ program
   .argument("[action]", "init (create config file) or show (print current config)")
   .option("--global", "Save to ~/.llm-router/config.json instead of local")
   .action((action, opts) => {
-    if (action === "init") {
-      const location = opts.global ? "global" : "local";
-      const filePath = saveConfigTemplate(location as any);
-      console.log(`Config file created at: ${filePath}`);
-      console.log("Edit it to add your API keys, or set them as environment variables.");
-    } else if (action === "show") {
-      try {
+    try {
+      if (action === "init") {
+        const location = opts.global ? "global" : "local";
+        const filePath = saveConfigTemplate(location as any);
+        console.log(`Config file created at: ${filePath}`);
+        console.log("Edit it to add your API keys, or set them as environment variables.");
+      } else if (action === "show") {
         const config = loadConfig();
         // Mask API keys for display
         const display = JSON.parse(JSON.stringify(config));
         for (const [name, provider] of Object.entries(display.providers || {})) {
-          if ((provider as any)?.apiKey) {
-            (provider as any).apiKey = (provider as any).apiKey.slice(0, 8) + "...";
+          const key = (provider as any)?.apiKey;
+          if (key && key.length > 8) {
+            (provider as any).apiKey = key.slice(0, 8) + "...";
+          } else if (key) {
+            (provider as any).apiKey = "***";
           }
         }
         console.log(JSON.stringify(display, null, 2));
-      } catch {
-        console.log("No config loaded. Using env vars. Run: llm-router config init");
-      }
     } else {
       console.log("Usage: llm-router config init [--global] | llm-router config show");
+    }
+    } catch (err: any) {
+      console.error(c(RD, `Error: ${err.message}`));
+      process.exit(1);
     }
   });
 
